@@ -10,15 +10,49 @@ use std::{
 };
 use syntax::{
     ast::{
-        edit::AstNodeEdit, BlockExpr, Enum, Expr, FieldList, HasAttrs, HasDocComments,
-        HasGenericParams, HasModuleItem, HasName, HasVisibility, IfExpr, Item, LetStmt, Module,
-        Pat, Path, Stmt, Struct, Type, Use, Visibility,
+        edit::AstNodeEdit, BlockExpr, Enum, Expr, FieldList, GenericParamList, HasAttrs, HasDocComments, HasGenericParams, HasModuleItem, HasName, HasVisibility, IfExpr, Item, LetStmt, Module, Pat, Path, Stmt, Struct, Type, Use, Visibility
     },
     AstNode, Edition, SourceFile, SyntaxToken,
 };
 
 mod validate;
 mod parser;
+
+#[derive(Debug)]
+enum Field {
+    String(String),
+    Bool(bool),
+    Number(i128),
+    Null,
+}
+
+#[derive(Debug, Default)]
+struct Node {
+    labels: Vec<String>,
+    fields: HashMap<String, Field>,
+}
+
+#[derive(Debug, Default)]
+struct Edge {
+    labels: Vec<String>,
+    fields: HashMap<String, Field>,
+}
+
+type UnitedGraph = Graph<Node, Edge>;
+
+struct State {
+    files_roots: Vec<NodeIndex>,
+    graph: UnitedGraph,
+}
+
+impl State {
+    fn new() -> Self {
+        Self {
+            graph: UnitedGraph::new(),
+            files_roots: Vec::new(),
+        }
+    }
+}
 
 fn gen_attrs(
     graph: &mut UnitedGraph, 
@@ -121,7 +155,7 @@ fn gen_path(
         });
 
         let edge = Edge { 
-            labels: vec!["CTX".to_string()], 
+            labels: vec!["CST".to_string()], 
             fields: HashMap::new(),
         };
         graph.add_edge(path_segment, node, edge);
@@ -207,7 +241,7 @@ fn gen_visibility(
         });
 
         let edge = Edge { 
-            labels: vec!["CTX".to_string()], 
+            labels: vec!["CST".to_string()], 
             fields: HashMap::new(),
         };
         graph.add_edge(visibility, node, edge);
@@ -218,6 +252,164 @@ fn gen_visibility(
     }
 
     graph.add_edge(visibility, parent, vis_edge);
+}
+
+fn gen_generic_param_list(
+    graph: &mut UnitedGraph, 
+    gp: GenericParamList, 
+    parent: NodeIndex,
+) {
+    let gp_node = graph.add_node(Node {
+        labels: vec!["AST".to_string(), "GenericList".to_string()],
+        fields: Default::default(),
+    });
+
+    use syntax::ast::GenericParamList;
+    let items: Vec<(&str, Box<dyn Fn(&GenericParamList)->Option<SyntaxToken>>)>= vec![
+        ("LAngle", Box::new(GenericParamList::l_angle_token)),
+        ("RAngle", Box::new(GenericParamList::r_angle_token)),
+    ];
+    for (name, toke) in items {
+        let mut fields = HashMap::new();
+        fields.insert("type".to_string(), Field::String(name.to_string()));
+
+        match toke(&gp) {
+            Some(keyword) => {
+                let start = keyword.text_range().start().raw;
+                fields.insert("position_start".to_string(), Field::Number(start.into()));
+                let end = keyword.text_range().end().raw;
+                fields.insert("position_end".to_string(),Field::Number(end.into()));
+            },
+            None => {
+                fields.insert("position_start".to_string(),Field::Null);
+                fields.insert("position_end".to_string(),Field::Null);
+            },
+        }
+
+        let node = graph.add_node(Node {
+            labels: vec![],
+            fields,
+        });
+
+        let edge = Edge { 
+            labels: vec!["CST".to_string()], 
+            fields: HashMap::new(),
+        };
+        graph.add_edge(gp_node, node, edge);
+    }
+
+    for item in gp.generic_params() {
+        todo!()
+    }
+}
+
+fn gen_field_list(
+    graph: &mut UnitedGraph, 
+    flist: Option<syntax::ast::FieldList>, 
+    parent: NodeIndex, 
+) {
+    
+}
+
+/// Example:
+///
+///  {                       --------[CST, HAS_COMMENT] --> {
+///   label: AST, Struct                                      label: "Comment",
+///                                                           text: ...,
+///  }                                                      }
+///  | | |
+///  | | |- [AST, CST, HAS_IDENT] --- { type: "Identifier", content: ..., position: ... }
+///  | | |
+///  | | |-[AST, HAS_GEN_PARAM] --  
+///  | |
+///  | ---[AST, HAS_ATTR]--> { 
+///  |                        label: Attribute,
+///  |                        meta: ... , 
+///  |                       }
+///  |--------\
+///  |         -----------
+///  {                   |   
+///   type: "Keyword"    { type: "LBrace", position: ... } 
+///   content: "struct"
+///   position: ...,
+///  }
+///  
+fn gen_struct(graph: &mut UnitedGraph, item: Struct) -> NodeIndex {
+    let struct_ast = graph.add_node(Node {
+        labels: vec!["AST".to_string(), "Struct".to_string()],
+        fields: Default::default(),
+    });
+    
+    if let Some(vis) = item.visibility() {
+        gen_visibility(graph, vis, struct_ast);
+    }
+
+    let mut fields = HashMap::new();
+    match item.struct_token() {
+        Some(keyword) => {
+            fields.insert("content".to_string(), Field::String(keyword.to_string()));
+            let start = keyword.text_range().start().raw;
+            fields.insert("position_start".to_string(), Field::Number(start.into()));
+            let end = keyword.text_range().end().raw;
+            fields.insert("position_end".to_string(),Field::Number(end.into()));
+        },
+        None => {
+            fields.insert("content".to_string(), Field::Null);
+            fields.insert("position_start".to_string(),Field::Null);
+            fields.insert("position_end".to_string(),Field::Null);
+        },
+    }
+    
+    let struct_keyword = graph.add_node(Node {
+        labels: vec!["CST".to_string()],
+        fields,
+    });
+    let edge = Edge { 
+        labels: vec!["CST".to_string()], 
+        fields: HashMap::new(),
+    };
+
+    graph.add_edge(struct_ast, struct_keyword, edge);
+    
+    if let Some(l) = item.generic_param_list() {
+        gen_generic_param_list(graph, l, struct_ast);
+    }
+
+    gen_field_list(graph, item.field_list(), struct_ast);
+    gen_attrs(graph, item.attrs(), struct_ast);
+    gen_docs(graph, item.doc_comments(), struct_ast);
+
+    struct_ast
+}
+
+fn gen_use(graph: &mut UnitedGraph, item: Use) {
+    todo!()
+}
+
+fn gen_union() {
+    
+}
+
+fn gen_item(graph: &mut UnitedGraph, item: Item) -> NodeIndex {
+    match item {
+        Item::Const(item) => todo!(),
+        Item::Enum(item) => todo!(),
+        Item::Module(module) => todo!(),
+        Item::Use(item) => todo!(),
+        Item::ExternBlock(extern_block) => todo!(),
+        Item::ExternCrate(extern_crate) => todo!(),
+        Item::Fn(_) => todo!(),
+        Item::Impl(_) => todo!(),
+        Item::MacroCall(macro_call) => todo!(),
+        Item::MacroDef(macro_def) => todo!(),
+        Item::MacroRules(macro_rules) => todo!(),
+        Item::Static(_) => todo!(),
+        Item::Struct(item) => gen_struct(graph, item),
+        Item::Trait(_) => todo!(),
+        Item::TraitAlias(trait_alias) => todo!(),
+        Item::TypeAlias(type_alias) => todo!(),
+        Item::Union(item) => gen_union(graph, item),
+    }
 }
 
 /*
@@ -283,28 +475,7 @@ fn parse_file(state: &mut State, path: &path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn gen_item(graph: &UnitedGraph, item: Item) -> NodeIndex {
-    match item {
-        Item::Const(item) => {
-            // Constant { name }
-            // HAS_TYPE
-            // HAS_ATTR
-            // VISIBLE_FROM
-            // TODO: Expr
-            // TODO: default for specialization
-
-            let expr = item.body().unwrap();
-        }
-        Item::Enum(item) => gen_enum(graph, item),
-        Item::Module(module) => gen_module(graph, module),
-        Item::Use(item) => gen_use(graph, item),
-        _ => todo!(),
-    }
-}
-
 fn gen_fn(graph: &Graph, item: Fn) {}
-
-fn gen_use(graph: &UnitedGraph, item: Use) {}
 
 fn gen_module(graph: &UnitedGraph, module: Module) -> NodeIndex {
     let name = module.name().unwrap().to_string();
@@ -778,125 +949,12 @@ fn gen_enum(graph: &Graph, item: Enum) -> NodeIndex {
 }
 */
 
-
-fn gen_field_list(
-    graph: &mut UnitedGraph, 
-    flist: Option<syntax::ast::FieldList>, 
-    parent: NodeIndex, 
-) {
-    
-}
-
-/// Example:
-///
-///  {                       --------[CST, HAS_COMMENT] --> {
-///   label: AST, Struct                                      label: "Comment",
-///                                                           text: ...,
-///  }                                                      }
-///  | | |
-///  | | |- [AST, CST, HAS_IDENT] --- { type: "Identifier", content: ..., position: ... }
-///  | | |
-///  | | |-[AST, HAS_GEN_PARAM] --  
-///  | |
-///  | ---[AST, HAS_ATTR]--> { 
-///  |                        label: Attribute,
-///  |                        meta: ... , 
-///  |                       }
-///  |--------\
-///  |         -----------
-///  {                   |   
-///   type: "Keyword"    { type: "LBrace", position: ... } 
-///   content: "struct"
-///   position: ...,
-///  }
-///  
-fn gen_struct(graph: &mut UnitedGraph, item: Struct) -> NodeIndex {
-    let struct_ast = graph.add_node(Node {
-        labels: vec!["AST".to_string(), "Struct".to_string()],
-        fields: Default::default(),
-    });
-    
-    if let Some(vis) = item.visibility() {
-        gen_visibility(graph, vis, struct_ast);
-    }
-
-    let mut fields = HashMap::new();
-    match item.struct_token() {
-        Some(keyword) => {
-            fields.insert("content".to_string(), Field::String(keyword.to_string()));
-            let start = keyword.text_range().start().raw;
-            fields.insert("position_start".to_string(), Field::Number(start.into()));
-            let end = keyword.text_range().end().raw;
-            fields.insert("position_end".to_string(),Field::Number(end.into()));
-        },
-        None => {
-            fields.insert("content".to_string(), Field::Null);
-            fields.insert("position_start".to_string(),Field::Null);
-            fields.insert("position_end".to_string(),Field::Null);
-        },
-    }
-    
-    let struct_keyword = graph.add_node(Node {
-        labels: vec!["CST".to_string()],
-        fields,
-    });
-    let edge = Edge { 
-        labels: vec!["CTX".to_string()], 
-        fields: HashMap::new(),
-    };
-
-    graph.add_edge(struct_ast, struct_keyword, edge);
-    
-    item.generic_param_list();
-
-    gen_field_list(graph, item.field_list(), struct_ast);
-    gen_attrs(graph, item.attrs(), struct_ast);
-    gen_docs(graph, item.doc_comments(), struct_ast);
-
-    struct_ast
-}
-
-enum Field {
-    String(String),
-    Bool(bool),
-    Number(i128),
-    Null,
-}
-
-#[derive(Default)]
-struct Node {
-    labels: Vec<String>,
-    fields: HashMap<String, Field>,
-}
-
-#[derive(Default)]
-struct Edge {
-    labels: Vec<String>,
-    fields: HashMap<String, Field>,
-}
-
-type UnitedGraph = Graph<Node, Edge>;
-
-struct State {
-    files_roots: Vec<NodeIndex>,
-    graph: UnitedGraph,
-}
-
-impl State {
-    fn new() -> Self {
-        Self {
-            graph: UnitedGraph::new(),
-            files_roots: Vec::new(),
-        }
-    }
-}
-
 #[test]
 fn test_struct_parse() {
     let mut state = State::new();
 
     let payload = r#"
-        pub (in self::ident1::ident2) struct Some {
+        pub (in ::super::some) struct Some {
 
         }
     "#;
