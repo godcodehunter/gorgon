@@ -10,7 +10,7 @@ use std::{
 };
 use syntax::{
     ast::{
-        self, edit::AstNodeEdit, BlockExpr, Enum, Expr, FieldList, GenericParamList, HasAttrs, HasDocComments, HasGenericParams, HasModuleItem, HasName, HasVisibility, IfExpr, Item, LetStmt, Module, Pat, Path, Stmt, Struct, Type, TypeAlias, Union, Use, Visibility
+        self, edit::AstNodeEdit, BlockExpr, Enum, Expr, FieldList, GenericParamList, HasAttrs, HasDocComments, HasGenericParams, HasModuleItem, HasName, HasVisibility, IfExpr, Item, LetStmt, Module, Pat, Path, PathSegment, Stmt, Struct, Type, TypeAlias, Union, Use, Visibility
     },
     AstNode, Edition, SourceFile, SyntaxToken,
 };
@@ -133,6 +133,14 @@ fn gen_docs(
     }
 }
 
+fn gen_path_segment(
+    graph: &mut UnitedGraph,
+    path: PathSegment,
+    parent: NodeIndex,
+) {
+    //TODO
+}
+
 /// 
 /// PathSegment --[NEXT] --> PathSegment
 ///
@@ -163,8 +171,9 @@ fn gen_path(
             fields: Default::default(),
         });
         
-        // TODO
-        // i.segment();
+        if let Some(segment) = i.segment() {
+            gen_path_segment(graph, segment, path_segment)
+        } 
 
         gen_token(
             graph, 
@@ -286,7 +295,7 @@ fn gen_field_list(
     flist: syntax::ast::FieldList, 
     parent: NodeIndex, 
 ) {
-    let f_node = graph.add_node(Node {
+    let field_list_ast = graph.add_node(Node {
         labels: vec!["AST".to_string(), "FieldList".to_string()],
         fields: Default::default(),
     });
@@ -303,11 +312,11 @@ fn gen_field_list(
                     graph,
                     name,
                     toke(&rl),
-                    f_node,
+                    field_list_ast,
                 )
             }
 
-            let mut prev = f_node;
+            let mut prev = field_list_ast;
             for item in rl.fields() {
                 let field_ast = graph.add_node(Node {
                     labels: vec!["AST".to_string(), "Field".to_string()],
@@ -357,7 +366,7 @@ fn gen_field_list(
         labels: vec!["AST".to_string(), "CST".to_string()], 
         fields: HashMap::new(),
     };
-    graph.add_edge(parent, f_node, edge);
+    graph.add_edge(parent, field_list_ast, edge);
 }
 
 fn gen_name(
@@ -371,8 +380,7 @@ fn gen_name(
         fields.insert("type".to_string(), Field::String("Identifier".to_string()));
         fields.insert("content".to_string(), Field::String(ident.to_string()));
     } else {
-        fields.insert("type".to_string(), Field::String("Keyword".to_string()));
-        fields.insert("content".to_string(), Field::String(ident.to_string()));
+        fields.insert("type".to_string(), Field::String(ident.to_string()));
     }
 
     match ident.ident_token() {
@@ -401,10 +409,10 @@ fn gen_name(
 }
 
 fn gen_type(graph: &mut UnitedGraph, ty: Type, parent: NodeIndex) {
-    match ty {
-        Type::PathType(path_type) => todo!(),
-        _ => todo!(),
-    }
+    // match ty {
+    //     Type::PathType(path_type) => todo!(),
+    //     _ => todo!(),
+    // }
 }
 
 /// Example:
@@ -484,6 +492,17 @@ fn gen_type_alias(graph: &mut UnitedGraph, item: TypeAlias) -> NodeIndex {
     todo!()
 }
 
+fn gen_fn(graph: &mut UnitedGraph, item: ast::Fn) -> NodeIndex {
+    let func_ast = graph.add_node(Node {
+        labels: vec!["AST".to_string(), "Function".to_string()],
+        fields: Default::default(),
+    });
+
+
+
+    func_ast
+}
+
 fn gen_item(graph: &mut UnitedGraph, item: Item) -> NodeIndex {
     match item {
         Item::Const(item) => todo!(),
@@ -492,7 +511,7 @@ fn gen_item(graph: &mut UnitedGraph, item: Item) -> NodeIndex {
         Item::Use(item) => todo!(),
         Item::ExternBlock(extern_block) => todo!(),
         Item::ExternCrate(extern_crate) => todo!(),
-        Item::Fn(_) => todo!(),
+        Item::Fn(func) => gen_fn(graph, func),
         Item::Impl(_) => todo!(),
         Item::MacroCall(macro_call) => todo!(),
         Item::MacroDef(macro_def) => todo!(),
@@ -568,8 +587,6 @@ fn parse_file(state: &mut State, path: &path::Path) -> anyhow::Result<()> {
 
     Ok(())
 }
-
-fn gen_fn(graph: &Graph, item: Fn) {}
 
 fn gen_module(graph: &UnitedGraph, module: Module) -> NodeIndex {
     let name = module.name().unwrap().to_string();
