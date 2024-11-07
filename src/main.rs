@@ -10,13 +10,14 @@ use std::{
 };
 use syntax::{
     ast::{
-        edit::AstNodeEdit, BlockExpr, Enum, Expr, FieldList, GenericParamList, HasAttrs, HasDocComments, HasGenericParams, HasModuleItem, HasName, HasVisibility, IfExpr, Item, LetStmt, Module, Pat, Path, Stmt, Struct, Type, Use, Visibility
+        self, edit::AstNodeEdit, BlockExpr, Enum, Expr, FieldList, GenericParamList, HasAttrs, HasDocComments, HasGenericParams, HasModuleItem, HasName, HasVisibility, IfExpr, Item, LetStmt, Module, Pat, Path, Stmt, Struct, Type, TypeAlias, Union, Use, Visibility
     },
     AstNode, Edition, SourceFile, SyntaxToken,
 };
 
 mod validate;
 mod parser;
+mod engine;
 
 #[derive(Debug)]
 enum Field {
@@ -265,7 +266,7 @@ fn gen_generic_param_list(
     });
 
     use syntax::ast::GenericParamList;
-    let items: Vec<(&str, Box<dyn Fn(&GenericParamList)->Option<SyntaxToken>>)>= vec![
+    let items: Vec<(&str, Box<dyn Fn(&GenericParamList) -> Option<SyntaxToken>>)>= vec![
         ("LAngle", Box::new(GenericParamList::l_angle_token)),
         ("RAngle", Box::new(GenericParamList::r_angle_token)),
     ];
@@ -305,10 +306,104 @@ fn gen_generic_param_list(
 
 fn gen_field_list(
     graph: &mut UnitedGraph, 
-    flist: Option<syntax::ast::FieldList>, 
+    flist: syntax::ast::FieldList, 
     parent: NodeIndex, 
 ) {
+    let f_node = graph.add_node(Node {
+        labels: vec!["AST".to_string(), "FieldList".to_string()],
+        fields: Default::default(),
+    });
+
+    match flist {
+        FieldList::RecordFieldList(record_field_list) => {
+            todo!()
+        },
+        FieldList::TupleFieldList(tl) => {
+            use syntax::ast::TupleFieldList;
+            let items: Vec<(&str, Box<dyn Fn(&TupleFieldList) -> Option<SyntaxToken>>)>= vec![
+                ("LParenthesis", Box::new(TupleFieldList::l_paren_token)),
+                ("RParenthesis", Box::new(TupleFieldList::r_paren_token)),
+            ];
+            for (name, toke) in items {
+                let mut fields = HashMap::new();
+                fields.insert("type".to_string(), Field::String(name.to_string()));
+        
+                match toke(&tl) {
+                    Some(keyword) => {
+                        let start = keyword.text_range().start().raw;
+                        fields.insert("position_start".to_string(), Field::Number(start.into()));
+                        let end = keyword.text_range().end().raw;
+                        fields.insert("position_end".to_string(),Field::Number(end.into()));
+                    },
+                    None => {
+                        fields.insert("position_start".to_string(),Field::Null);
+                        fields.insert("position_end".to_string(),Field::Null);
+                    },
+                }
+        
+                let node = graph.add_node(Node {
+                    labels: vec![],
+                    fields,
+                });
+        
+                let edge = Edge { 
+                    labels: vec!["CST".to_string()], 
+                    fields: HashMap::new(),
+                };
+                graph.add_edge(f_node, node, edge);
+
+                for item in tl.fields() {
+                    todo!();
+                }
+            }
+        },
+    }
     
+    let edge = Edge { 
+        labels: vec!["AST".to_string(), "CST".to_string()], 
+        fields: HashMap::new(),
+    };
+    graph.add_edge(parent, f_node, edge);
+}
+
+fn gen_name(
+    graph: &mut UnitedGraph,
+    ident: ast::Name,
+    parent: NodeIndex,
+) {
+    let mut fields = HashMap::new();
+    
+    if ident.ident_token().is_some() {
+        fields.insert("type".to_string(), Field::String("Identifier".to_string()));
+        fields.insert("content".to_string(), Field::String(ident.to_string()));
+    } else {
+        fields.insert("type".to_string(), Field::String("Keyword".to_string()));
+        fields.insert("content".to_string(), Field::String(ident.to_string()));
+    }
+
+    match ident.ident_token() {
+        Some(keyword) => {
+            let start = keyword.text_range().start().raw;
+            fields.insert("position_start".to_string(), Field::Number(start.into()));
+            let end = keyword.text_range().end().raw;
+            fields.insert("position_end".to_string(),Field::Number(end.into()));
+        },
+        None => {
+            fields.insert("position_start".to_string(),Field::Null);
+            fields.insert("position_end".to_string(),Field::Null);
+        },
+    }
+
+    let node = graph.add_node(Node {
+        labels: vec![],
+        fields,
+    });
+
+    let edge = Edge { 
+        labels: vec!["AST".to_string(), "CST".to_string()], 
+        fields: HashMap::new(),
+    };
+    graph.add_edge(parent, node, edge);
 }
 
 /// Example:
@@ -371,23 +466,34 @@ fn gen_struct(graph: &mut UnitedGraph, item: Struct) -> NodeIndex {
 
     graph.add_edge(struct_ast, struct_keyword, edge);
     
+    if let Some(name) = item.name() {
+        gen_name(graph, name, struct_ast);
+    }
+
     if let Some(l) = item.generic_param_list() {
         gen_generic_param_list(graph, l, struct_ast);
     }
 
-    gen_field_list(graph, item.field_list(), struct_ast);
+    if let Some(flist) = item.field_list() {
+        gen_field_list(graph, flist, struct_ast);
+    }
+    
     gen_attrs(graph, item.attrs(), struct_ast);
     gen_docs(graph, item.doc_comments(), struct_ast);
 
     struct_ast
 }
 
-fn gen_use(graph: &mut UnitedGraph, item: Use) {
+fn gen_use(graph: &mut UnitedGraph, item: Use) -> NodeIndex {
     todo!()
 }
 
-fn gen_union() {
-    
+fn gen_union(graph: &mut UnitedGraph, item: Union) -> NodeIndex {
+    todo!()
+}
+
+fn gen_type_alias(graph: &mut UnitedGraph, item: TypeAlias) -> NodeIndex {
+    todo!()
 }
 
 fn gen_item(graph: &mut UnitedGraph, item: Item) -> NodeIndex {
@@ -407,7 +513,7 @@ fn gen_item(graph: &mut UnitedGraph, item: Item) -> NodeIndex {
         Item::Struct(item) => gen_struct(graph, item),
         Item::Trait(_) => todo!(),
         Item::TraitAlias(trait_alias) => todo!(),
-        Item::TypeAlias(type_alias) => todo!(),
+        Item::TypeAlias(type_alias) => gen_type_alias(graph, type_alias),
         Item::Union(item) => gen_union(graph, item),
     }
 }
@@ -966,6 +1072,9 @@ fn test_struct_parse() {
     for item in istruct {
         gen_struct(&mut state.graph, item);
     }
+    
+    let data = format!("{:?}", petgraph::dot::Dot::with_config(&state.graph, &[]));
+    fs::write("./foo.dot", data).expect("Unable to write file");
 }
 
 fn main() {
