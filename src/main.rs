@@ -283,9 +283,7 @@ fn gen_generic_param_list(
         match item {
             ast::GenericParam::ConstParam(const_param) => todo!(),
             ast::GenericParam::LifetimeParam(lifetime_param) => todo!(),
-            ast::GenericParam::TypeParam(type_param) => {
-
-            },
+            ast::GenericParam::TypeParam(type_param) => todo!(),
         }
     }
 }
@@ -498,7 +496,7 @@ fn gen_fn(graph: &mut UnitedGraph, item: ast::Fn) -> NodeIndex {
         fields: Default::default(),
     });
 
-
+    todo!();
 
     func_ast
 }
