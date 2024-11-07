@@ -269,8 +269,15 @@ fn gen_generic_param_list(
         );
     }
 
+    let mut prev = gp_node;
     for item in gp.generic_params() {
-        todo!()
+        match item {
+            ast::GenericParam::ConstParam(const_param) => todo!(),
+            ast::GenericParam::LifetimeParam(lifetime_param) => todo!(),
+            ast::GenericParam::TypeParam(type_param) => {
+
+            },
+        }
     }
 }
 
@@ -292,61 +299,41 @@ fn gen_field_list(
                 ("RCurly", Box::new(RecordFieldList::r_curly_token)),
             ];
             for (name, toke) in items {
-                let mut fields = HashMap::new();
-                fields.insert("type".to_string(), Field::String(name.to_string()));
-        
-                match toke(&rl) {
-                    Some(keyword) => {
-                        let start = keyword.text_range().start().raw;
-                        fields.insert("position_start".to_string(), Field::Number(start.into()));
-                        let end = keyword.text_range().end().raw;
-                        fields.insert("position_end".to_string(),Field::Number(end.into()));
-                    },
-                    None => {
-                        fields.insert("position_start".to_string(),Field::Null);
-                        fields.insert("position_end".to_string(),Field::Null);
-                    },
-                }
-        
-                let node = graph.add_node(Node {
-                    labels: vec![],
-                    fields,
-                });
-        
-                let edge = Edge { 
-                    labels: vec!["CST".to_string()], 
-                    fields: HashMap::new(),
-                };
-                graph.add_edge(f_node, node, edge);
+                gen_token(
+                    graph,
+                    name,
+                    toke(&rl),
+                    f_node,
+                )
             }
 
             let mut prev = f_node;
             for item in rl.fields() {
-                let node = graph.add_node(Node {
+                let field_ast = graph.add_node(Node {
                     labels: vec!["AST".to_string(), "Field".to_string()],
                     fields: Default::default(),
                 });
 
                 if let Some(ident) = item.name() {
-                    gen_name(graph, ident, node);
+                    gen_name(graph, ident, field_ast);
                 }
                 
-                gen_attrs(graph, item.attrs(), node);
-                gen_docs(graph, item.doc_comments(), node);
+                gen_attrs(graph, item.attrs(), field_ast);
+                gen_docs(graph, item.doc_comments(), field_ast);
 
                 if let Some(vis) = item.visibility() {
-                    gen_visibility(graph, vis, node);
+                    gen_visibility(graph, vis, field_ast);
                 }
                 
                 if let Some(ty) = item.ty() {
-                    gen_type(graph, ty, node);
+                    gen_type(graph, ty, field_ast);
                 }
                 
                 gen_token(
                     graph,
                     "Colon",
                     item.colon_token(),
-                    node
+                    field_ast
                 );
 
                 let edge = Edge { 
@@ -357,8 +344,8 @@ fn gen_field_list(
                     ], 
                     fields: HashMap::new(),
                 };
-                graph.add_edge(prev, node, edge);
-                prev = node;
+                graph.add_edge(prev, field_ast, edge);
+                prev = field_ast;
             }
         },
         FieldList::TupleFieldList(tl) => {
@@ -414,7 +401,10 @@ fn gen_name(
 }
 
 fn gen_type(graph: &mut UnitedGraph, ty: Type, parent: NodeIndex) {
-    //TODO
+    match ty {
+        Type::PathType(path_type) => todo!(),
+        _ => todo!(),
+    }
 }
 
 /// Example:
@@ -445,53 +435,40 @@ fn gen_struct(graph: &mut UnitedGraph, item: Struct) -> NodeIndex {
         labels: vec!["AST".to_string(), "Struct".to_string()],
         fields: Default::default(),
     });
-    
-    if let Some(vis) = item.visibility() {
-        gen_visibility(graph, vis, struct_ast);
-    }
 
-    let mut fields = HashMap::new();
-    match item.struct_token() {
-        Some(keyword) => {
-            fields.insert("content".to_string(), Field::String(keyword.to_string()));
-            let start = keyword.text_range().start().raw;
-            fields.insert("position_start".to_string(), Field::Number(start.into()));
-            let end = keyword.text_range().end().raw;
-            fields.insert("position_end".to_string(),Field::Number(end.into()));
-        },
-        None => {
-            fields.insert("content".to_string(), Field::Null);
-            fields.insert("position_start".to_string(),Field::Null);
-            fields.insert("position_end".to_string(),Field::Null);
-        },
-    }
-    
-    let struct_keyword = graph.add_node(Node {
-        labels: vec!["CST".to_string()],
-        fields,
-    });
-    let edge = Edge { 
-        labels: vec!["CST".to_string()], 
-        fields: HashMap::new(),
-    };
-
-    graph.add_edge(struct_ast, struct_keyword, edge);
-    
-    if let Some(name) = item.name() {
-        gen_name(graph, name, struct_ast);
-    }
+    gen_attrs(graph, item.attrs(), struct_ast);
+    gen_docs(graph, item.doc_comments(), struct_ast);
 
     if let Some(l) = item.generic_param_list() {
         gen_generic_param_list(graph, l, struct_ast);
     }
 
+    if let Some(name) = item.name() {
+        gen_name(graph, name, struct_ast);
+    }
+
+    if let Some(vis) = item.visibility() {
+        gen_visibility(graph, vis, struct_ast);
+    }
+
     if let Some(flist) = item.field_list() {
         gen_field_list(graph, flist, struct_ast);
     }
-    
-    gen_attrs(graph, item.attrs(), struct_ast);
-    gen_docs(graph, item.doc_comments(), struct_ast);
 
+    gen_token(
+        graph, 
+        "Semicolon", 
+        item.semicolon_token(),
+        struct_ast
+    );
+
+    gen_token(
+        graph, 
+        "Struct", 
+        item.struct_token(),
+        struct_ast
+    );
+    
     struct_ast
 }
 
