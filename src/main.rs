@@ -55,6 +55,40 @@ impl State {
     }
 }
 
+fn gen_token(
+    graph: &mut UnitedGraph,
+    ty: &str,
+    tok: Option<SyntaxToken>,
+    parent: NodeIndex
+) {
+    let mut fields = HashMap::new();
+    fields.insert("type".to_string(), Field::String(ty.to_string()));
+    
+    match tok {
+        Some(keyword) => {
+            let start = keyword.text_range().start().raw;
+            fields.insert("position_start".to_string(), Field::Number(start.into()));
+            let end = keyword.text_range().end().raw;
+            fields.insert("position_end".to_string(),Field::Number(end.into()));
+        },
+        None => {
+            fields.insert("position_start".to_string(),Field::Null);
+            fields.insert("position_end".to_string(),Field::Null);
+        },
+    }
+
+    let node = graph.add_node(Node {
+        labels: vec![],
+        fields,
+    });
+
+    let edge = Edge { 
+        labels: vec!["CST".to_string()], 
+        fields: HashMap::new(),
+    };
+    graph.add_edge(parent, node, edge);
+}
+
 fn gen_attrs(
     graph: &mut UnitedGraph, 
     attrs: syntax::ast::AstChildren<syntax::ast::Attr>, 
@@ -132,36 +166,12 @@ fn gen_path(
         // TODO
         // i.segment();
 
-        // ADD coloncolon token 
-        
-        let mut fields = HashMap::new();
-        fields.insert("type".to_string(), Field::String("Coloncolon".to_string()));
-        
-        match i.coloncolon_token() {
-            Some(keyword) => {
-                let start = keyword.text_range().start().raw;
-                fields.insert("position_start".to_string(), Field::Number(start.into()));
-                let end = keyword.text_range().end().raw;
-                fields.insert("position_end".to_string(),Field::Number(end.into()));
-            },
-            None => {
-                fields.insert("position_start".to_string(),Field::Null);
-                fields.insert("position_end".to_string(),Field::Null);
-            },
-        }
-
-        let node = graph.add_node(Node {
-            labels: vec![],
-            fields,
-        });
-
-        let edge = Edge { 
-            labels: vec!["CST".to_string()], 
-            fields: HashMap::new(),
-        };
-        graph.add_edge(path_segment, node, edge);
-
-        // END coloncolon token
+        gen_token(
+            graph, 
+            "Coloncolon", 
+            i.coloncolon_token(),
+            path_segment,
+        );
 
         let edge = Edge { 
             labels: vec!["AST".to_string(), "CST".to_string(), "NEXT".to_string()], 
@@ -220,32 +230,12 @@ fn gen_visibility(
         ("pub", Box::new(Visibility::pub_token)),
     ];
     for (name, toke) in items {
-        let mut fields = HashMap::new();
-        fields.insert("type".to_string(), Field::String(name.to_string()));
-        
-        match toke(&vis) {
-            Some(keyword) => {
-                let start = keyword.text_range().start().raw;
-                fields.insert("position_start".to_string(), Field::Number(start.into()));
-                let end = keyword.text_range().end().raw;
-                fields.insert("position_end".to_string(),Field::Number(end.into()));
-            },
-            None => {
-                fields.insert("position_start".to_string(),Field::Null);
-                fields.insert("position_end".to_string(),Field::Null);
-            },
-        }
-
-        let node = graph.add_node(Node {
-            labels: vec![],
-            fields,
-        });
-
-        let edge = Edge { 
-            labels: vec!["CST".to_string()], 
-            fields: HashMap::new(),
-        };
-        graph.add_edge(visibility, node, edge);
+        gen_token(
+            graph, 
+            name, 
+            toke(&vis),
+            visibility,
+        );
     }   
 
     if let Some(path) = vis.path() {
@@ -271,32 +261,12 @@ fn gen_generic_param_list(
         ("RAngle", Box::new(GenericParamList::r_angle_token)),
     ];
     for (name, toke) in items {
-        let mut fields = HashMap::new();
-        fields.insert("type".to_string(), Field::String(name.to_string()));
-
-        match toke(&gp) {
-            Some(keyword) => {
-                let start = keyword.text_range().start().raw;
-                fields.insert("position_start".to_string(), Field::Number(start.into()));
-                let end = keyword.text_range().end().raw;
-                fields.insert("position_end".to_string(),Field::Number(end.into()));
-            },
-            None => {
-                fields.insert("position_start".to_string(),Field::Null);
-                fields.insert("position_end".to_string(),Field::Null);
-            },
-        }
-
-        let node = graph.add_node(Node {
-            labels: vec![],
-            fields,
-        });
-
-        let edge = Edge { 
-            labels: vec!["CST".to_string()], 
-            fields: HashMap::new(),
-        };
-        graph.add_edge(gp_node, node, edge);
+        gen_token(
+            graph, 
+            name, 
+            toke(&gp),
+            gp_node,
+        );
     }
 
     for item in gp.generic_params() {
@@ -315,20 +285,17 @@ fn gen_field_list(
     });
 
     match flist {
-        FieldList::RecordFieldList(record_field_list) => {
-            todo!()
-        },
-        FieldList::TupleFieldList(tl) => {
-            use syntax::ast::TupleFieldList;
-            let items: Vec<(&str, Box<dyn Fn(&TupleFieldList) -> Option<SyntaxToken>>)>= vec![
-                ("LParenthesis", Box::new(TupleFieldList::l_paren_token)),
-                ("RParenthesis", Box::new(TupleFieldList::r_paren_token)),
+        FieldList::RecordFieldList(rl) => {
+            use syntax::ast::RecordFieldList;
+            let items: Vec<(&str, Box<dyn Fn(&RecordFieldList) -> Option<SyntaxToken>>)>= vec![
+                ("LCurly", Box::new(RecordFieldList::l_curly_token)),
+                ("RCurly", Box::new(RecordFieldList::r_curly_token)),
             ];
             for (name, toke) in items {
                 let mut fields = HashMap::new();
                 fields.insert("type".to_string(), Field::String(name.to_string()));
         
-                match toke(&tl) {
+                match toke(&rl) {
                     Some(keyword) => {
                         let start = keyword.text_range().start().raw;
                         fields.insert("position_start".to_string(), Field::Number(start.into()));
@@ -351,11 +318,51 @@ fn gen_field_list(
                     fields: HashMap::new(),
                 };
                 graph.add_edge(f_node, node, edge);
-
-                for item in tl.fields() {
-                    todo!();
-                }
             }
+
+            let mut prev = f_node;
+            for item in rl.fields() {
+                let node = graph.add_node(Node {
+                    labels: vec!["AST".to_string(), "Field".to_string()],
+                    fields: Default::default(),
+                });
+
+                if let Some(ident) = item.name() {
+                    gen_name(graph, ident, node);
+                }
+                
+                gen_attrs(graph, item.attrs(), node);
+                gen_docs(graph, item.doc_comments(), node);
+
+                if let Some(vis) = item.visibility() {
+                    gen_visibility(graph, vis, node);
+                }
+                
+                if let Some(ty) = item.ty() {
+                    gen_type(graph, ty, node);
+                }
+                
+                gen_token(
+                    graph,
+                    "Colon",
+                    item.colon_token(),
+                    node
+                );
+
+                let edge = Edge { 
+                    labels: vec![
+                        "AST".to_string(), 
+                        "CST".to_string(), 
+                        "NEXT".to_string(),
+                    ], 
+                    fields: HashMap::new(),
+                };
+                graph.add_edge(prev, node, edge);
+                prev = node;
+            }
+        },
+        FieldList::TupleFieldList(tl) => {
+            todo!()
         },
     }
     
@@ -404,6 +411,10 @@ fn gen_name(
         fields: HashMap::new(),
     };
     graph.add_edge(parent, node, edge);
+}
+
+fn gen_type(graph: &mut UnitedGraph, ty: Type, parent: NodeIndex) {
+    //TODO
 }
 
 /// Example:
@@ -936,10 +947,6 @@ fn gen_path(graph: &Graph, path: Path) -> String {
     todo!()
 }
 
-fn gen_type(graph: &Graph, ty: Type) -> String {
-    todo!()
-}
-
 fn gen_enum(graph: &Graph, item: Enum) -> NodeIndex {
     //TODO: generic params ???
     //TODO: where clause ???
@@ -1061,7 +1068,7 @@ fn test_struct_parse() {
 
     let payload = r#"
         pub (in ::super::some) struct Some {
-
+            item: u32,
         }
     "#;
 
