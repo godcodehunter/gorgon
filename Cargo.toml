@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 syntax = { git = "https://github.com/rust-lang/rust-analyzer.git" }
 petgraph = "0.6.4"
+winnow = "0.6.20"

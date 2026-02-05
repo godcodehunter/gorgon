@@ -1,4 +1,4 @@
-use petgraph::{ graph::NodeIndex, Graph};
+use petgraph::{graph::NodeIndex, Graph};
 use std::{
     collections::HashMap,
     default,
@@ -10,20 +10,21 @@ use std::{
 };
 use syntax::{
     ast::{
-        self, edit::AstNodeEdit, BlockExpr, Enum, Expr, FieldList, GenericParamList, HasAttrs, HasDocComments, HasGenericParams, HasModuleItem, HasName, HasVisibility, IfExpr, Item, LetStmt, Module, Pat, Path, PathSegment, Stmt, Struct, Type, TypeAlias, Union, Use, Visibility
+        self, edit::AstNodeEdit, BlockExpr, Enum, Expr, FieldList, GenericParamList, HasAttrs,
+        HasDocComments, HasGenericParams, HasModuleItem, HasName, HasVisibility, IfExpr, Item,
+        LetStmt, Module, Pat, Path, PathSegment, Stmt, Struct, Type, TypeAlias, Union, Use,
+        Visibility,
     },
     AstNode, Edition, SourceFile, SyntaxToken,
 };
 
 mod validate;
-mod parser;
-mod engine;
 
 #[derive(Debug)]
 enum Field {
     String(String),
     Bool(bool),
-    Number(i128),
+    Number(usize),
     Null,
 }
 
@@ -55,26 +56,21 @@ impl State {
     }
 }
 
-fn gen_token(
-    graph: &mut UnitedGraph,
-    ty: &str,
-    tok: Option<SyntaxToken>,
-    parent: NodeIndex
-) {
+fn gen_token(graph: &mut UnitedGraph, ty: &str, tok: Option<SyntaxToken>, parent: NodeIndex) {
     let mut fields = HashMap::new();
     fields.insert("type".to_string(), Field::String(ty.to_string()));
-    
+
     match tok {
         Some(keyword) => {
-            let start = keyword.text_range().start().raw;
+            let start = keyword.text_range().start();
             fields.insert("position_start".to_string(), Field::Number(start.into()));
-            let end = keyword.text_range().end().raw;
-            fields.insert("position_end".to_string(),Field::Number(end.into()));
-        },
+            let end = keyword.text_range().end();
+            fields.insert("position_end".to_string(), Field::Number(end.into()));
+        }
         None => {
-            fields.insert("position_start".to_string(),Field::Null);
-            fields.insert("position_end".to_string(),Field::Null);
-        },
+            fields.insert("position_start".to_string(), Field::Null);
+            fields.insert("position_end".to_string(), Field::Null);
+        }
     }
 
     let node = graph.add_node(Node {
@@ -82,16 +78,16 @@ fn gen_token(
         fields,
     });
 
-    let edge = Edge { 
-        labels: vec!["CST".to_string()], 
+    let edge = Edge {
+        labels: vec!["CST".to_string()],
         fields: HashMap::new(),
     };
     graph.add_edge(parent, node, edge);
 }
 
 fn gen_attrs(
-    graph: &mut UnitedGraph, 
-    attrs: syntax::ast::AstChildren<syntax::ast::Attr>, 
+    graph: &mut UnitedGraph,
+    attrs: syntax::ast::AstChildren<syntax::ast::Attr>,
     parent: NodeIndex,
 ) {
     for attr in attrs.into_iter() {
@@ -112,11 +108,7 @@ fn gen_attrs(
     }
 }
 
-fn gen_docs(
-    graph: &mut UnitedGraph, 
-    docs: syntax::ast::DocCommentIter, 
-    parent: NodeIndex,
-) {
+fn gen_docs(graph: &mut UnitedGraph, docs: syntax::ast::DocCommentIter, parent: NodeIndex) {
     for comment in docs {
         let comm_id = graph.add_node(Node {
             labels: vec!["Comment".to_string()],
@@ -124,8 +116,8 @@ fn gen_docs(
             ..Default::default()
         });
 
-        let edge = Edge { 
-            labels: vec!["CST".to_string(), "HAS_COMMENT".to_string()], 
+        let edge = Edge {
+            labels: vec!["CST".to_string(), "HAS_COMMENT".to_string()],
             fields: HashMap::new(),
         };
 
@@ -133,23 +125,15 @@ fn gen_docs(
     }
 }
 
-fn gen_path_segment(
-    graph: &mut UnitedGraph,
-    path: PathSegment,
-    parent: NodeIndex,
-) {
+fn gen_path_segment(graph: &mut UnitedGraph, path: PathSegment, parent: NodeIndex) {
     //TODO
 }
 
-/// 
+///
 /// PathSegment --[NEXT] --> PathSegment
 ///
 ///
-fn gen_path(
-    graph: &mut UnitedGraph,
-    path: Path,
-    parent: NodeIndex,
-) {
+fn gen_path(graph: &mut UnitedGraph, path: Path, parent: NodeIndex) {
     let mut stack = std::collections::VecDeque::new();
     stack.push_back(path.clone());
     let mut cpath = path;
@@ -159,31 +143,26 @@ fn gen_path(
             cpath = npath;
         } else {
             break;
-        }    
+        }
     }
 
     let mut start = None;
     let mut current = None;
-    
+
     for i in stack {
         let path_segment = graph.add_node(Node {
             labels: vec!["PathSegment".to_string()],
             fields: Default::default(),
         });
-        
+
         if let Some(segment) = i.segment() {
             gen_path_segment(graph, segment, path_segment)
-        } 
+        }
 
-        gen_token(
-            graph, 
-            "Coloncolon", 
-            i.coloncolon_token(),
-            path_segment,
-        );
+        gen_token(graph, "Coloncolon", i.coloncolon_token(), path_segment);
 
-        let edge = Edge { 
-            labels: vec!["AST".to_string(), "CST".to_string(), "NEXT".to_string()], 
+        let edge = Edge {
+            labels: vec!["AST".to_string(), "CST".to_string(), "NEXT".to_string()],
             fields: HashMap::new(),
         };
 
@@ -197,14 +176,16 @@ fn gen_path(
         }
     }
 
-    let edge = Edge { 
-        labels: vec!["AST".to_string(), "CST".to_string(), "HAS_PATH".to_string()], 
+    let edge = Edge {
+        labels: vec!["AST".to_string(), "CST".to_string(), "HAS_PATH".to_string()],
         fields: HashMap::new(),
     };
 
     graph.add_edge(start.unwrap(), parent, edge);
 }
 
+/// Rust reference: https://doc.rust-lang.org/reference/visibility-and-privacy.html
+///
 ///
 /// parent <-- [AST, HASH_VIS] -- { label AST, Visibility}
 ///                                 |              |   |
@@ -216,66 +197,48 @@ fn gen_path(
 ///                                                |
 ///                                                path
 ///                                 
-fn gen_visibility(
-    graph: &mut UnitedGraph, 
-    vis: Visibility, 
-    parent: NodeIndex,
-) {
+fn gen_visibility(graph: &mut UnitedGraph, vis: Visibility, parent: NodeIndex) {
     let visibility = graph.add_node(Node {
         labels: vec!["AST".to_string(), "Visibility".to_string()],
         fields: Default::default(),
     });
 
-    let vis_edge = Edge { 
-        labels: vec!["AST".to_string(), "HAS_VIS".to_string()], 
+    let vis_edge = Edge {
+        labels: vec!["AST".to_string(), "HAS_VIS".to_string()],
         fields: HashMap::new(),
     };
-    
+
     use syntax::ast::Visibility;
-    let items: Vec<(&str, Box<dyn Fn(&Visibility)->Option<SyntaxToken>>)>= vec![
+    let items: Vec<(&str, Box<dyn Fn(&Visibility) -> Option<SyntaxToken>>)> = vec![
         ("LParenthesis", Box::new(Visibility::l_paren_token)),
         ("RParenthesis", Box::new(Visibility::r_paren_token)),
         ("in", Box::new(Visibility::in_token)),
         ("pub", Box::new(Visibility::pub_token)),
     ];
     for (name, toke) in items {
-        gen_token(
-            graph, 
-            name, 
-            toke(&vis),
-            visibility,
-        );
-    }   
+        gen_token(graph, name, toke(&vis), visibility);
+    }
 
     if let Some(path) = vis.path() {
-        gen_path(graph, path, visibility); 
+        gen_path(graph, path, visibility);
     }
 
     graph.add_edge(visibility, parent, vis_edge);
 }
 
-fn gen_generic_param_list(
-    graph: &mut UnitedGraph, 
-    gp: GenericParamList, 
-    parent: NodeIndex,
-) {
+fn gen_generic_param_list(graph: &mut UnitedGraph, gp: GenericParamList, parent: NodeIndex) {
     let gp_node = graph.add_node(Node {
         labels: vec!["AST".to_string(), "GenericList".to_string()],
         fields: Default::default(),
     });
 
     use syntax::ast::GenericParamList;
-    let items: Vec<(&str, Box<dyn Fn(&GenericParamList) -> Option<SyntaxToken>>)>= vec![
+    let items: Vec<(&str, Box<dyn Fn(&GenericParamList) -> Option<SyntaxToken>>)> = vec![
         ("LAngle", Box::new(GenericParamList::l_angle_token)),
         ("RAngle", Box::new(GenericParamList::r_angle_token)),
     ];
     for (name, toke) in items {
-        gen_token(
-            graph, 
-            name, 
-            toke(&gp),
-            gp_node,
-        );
+        gen_token(graph, name, toke(&gp), gp_node);
     }
 
     let mut prev = gp_node;
@@ -288,11 +251,7 @@ fn gen_generic_param_list(
     }
 }
 
-fn gen_field_list(
-    graph: &mut UnitedGraph, 
-    flist: syntax::ast::FieldList, 
-    parent: NodeIndex, 
-) {
+fn gen_field_list(graph: &mut UnitedGraph, flist: syntax::ast::FieldList, parent: NodeIndex) {
     let field_list_ast = graph.add_node(Node {
         labels: vec!["AST".to_string(), "FieldList".to_string()],
         fields: Default::default(),
@@ -301,17 +260,12 @@ fn gen_field_list(
     match flist {
         FieldList::RecordFieldList(rl) => {
             use syntax::ast::RecordFieldList;
-            let items: Vec<(&str, Box<dyn Fn(&RecordFieldList) -> Option<SyntaxToken>>)>= vec![
+            let items: Vec<(&str, Box<dyn Fn(&RecordFieldList) -> Option<SyntaxToken>>)> = vec![
                 ("LCurly", Box::new(RecordFieldList::l_curly_token)),
                 ("RCurly", Box::new(RecordFieldList::r_curly_token)),
             ];
             for (name, toke) in items {
-                gen_token(
-                    graph,
-                    name,
-                    toke(&rl),
-                    field_list_ast,
-                )
+                gen_token(graph, name, toke(&rl), field_list_ast)
             }
 
             let mut prev = field_list_ast;
@@ -324,56 +278,43 @@ fn gen_field_list(
                 if let Some(ident) = item.name() {
                     gen_name(graph, ident, field_ast);
                 }
-                
+
                 gen_attrs(graph, item.attrs(), field_ast);
                 gen_docs(graph, item.doc_comments(), field_ast);
 
                 if let Some(vis) = item.visibility() {
                     gen_visibility(graph, vis, field_ast);
                 }
-                
+
                 if let Some(ty) = item.ty() {
                     gen_type(graph, ty, field_ast);
                 }
-                
-                gen_token(
-                    graph,
-                    "Colon",
-                    item.colon_token(),
-                    field_ast
-                );
 
-                let edge = Edge { 
-                    labels: vec![
-                        "AST".to_string(), 
-                        "CST".to_string(), 
-                        "NEXT".to_string(),
-                    ], 
+                gen_token(graph, "Colon", item.colon_token(), field_ast);
+
+                let edge = Edge {
+                    labels: vec!["AST".to_string(), "CST".to_string(), "NEXT".to_string()],
                     fields: HashMap::new(),
                 };
                 graph.add_edge(prev, field_ast, edge);
                 prev = field_ast;
             }
-        },
+        }
         FieldList::TupleFieldList(tl) => {
             todo!()
-        },
+        }
     }
-    
-    let edge = Edge { 
-        labels: vec!["AST".to_string(), "CST".to_string()], 
+
+    let edge = Edge {
+        labels: vec!["AST".to_string(), "CST".to_string()],
         fields: HashMap::new(),
     };
     graph.add_edge(parent, field_list_ast, edge);
 }
 
-fn gen_name(
-    graph: &mut UnitedGraph,
-    ident: ast::Name,
-    parent: NodeIndex,
-) {
+fn gen_name(graph: &mut UnitedGraph, ident: ast::Name, parent: NodeIndex) {
     let mut fields = HashMap::new();
-    
+
     if ident.ident_token().is_some() {
         fields.insert("type".to_string(), Field::String("Identifier".to_string()));
         fields.insert("content".to_string(), Field::String(ident.to_string()));
@@ -383,15 +324,20 @@ fn gen_name(
 
     match ident.ident_token() {
         Some(keyword) => {
-            let start = keyword.text_range().start().raw;
+            let start = keyword.text_range().start();
             fields.insert("position_start".to_string(), Field::Number(start.into()));
-            let end = keyword.text_range().end().raw;
-            fields.insert("position_end".to_string(),Field::Number(end.into()));
-        },
-        None => {
-            fields.insert("position_start".to_string(),Field::Null);
-            fields.insert("position_end".to_string(),Field::Null);
-        },
+            let end = keyword.text_range().end();
+            fields.insert("position_end".to_string(), Field::Number(end.into()));
+        }
+        None => match ident.self_token() {
+            Some(self_kw) => {
+                let start = self_kw.text_range().start();
+                fields.insert("position_start".to_string(), Field::Number(start.into()));
+                let end = self_kw.text_range().end();
+                fields.insert("position_end".to_string(), Field::Number(end.into()));
+            },
+            None => {},
+        }
     }
 
     let node = graph.add_node(Node {
@@ -399,18 +345,63 @@ fn gen_name(
         fields,
     });
 
-    let edge = Edge { 
-        labels: vec!["AST".to_string(), "CST".to_string()], 
+    let edge = Edge {
+        labels: vec!["AST".to_string(), "CST".to_string()],
         fields: HashMap::new(),
     };
     graph.add_edge(parent, node, edge);
 }
 
+// TODO: !!!!
 fn gen_type(graph: &mut UnitedGraph, ty: Type, parent: NodeIndex) {
     // match ty {
     //     Type::PathType(path_type) => todo!(),
     //     _ => todo!(),
     // }
+}
+
+// TODO: !!!!
+fn gen_ret_type(graph: &mut UnitedGraph, ty: ast::RetType, parent: NodeIndex) {
+    todo!()
+}
+
+fn gen_abi(graph: &mut UnitedGraph, ty: ast::Abi, parent: NodeIndex) {
+    todo!()
+}
+
+fn gen_block(graph: &mut UnitedGraph, ty: ast::BlockExpr, parent: NodeIndex) {
+    // let struct_ast = graph.add_node(Node {
+    //     labels: vec!["AST".to_string(), "BlockExpression".to_string()],
+    //     fields: Default::default(),
+    // });
+
+    // let mut q_body = String::new();
+    
+    // q_body.push_str(&format!("CREATE (block: BlockExpression)\n"));
+
+    // for attr in expr.attrs() {
+    //     q_body.push_str(&format!(
+    //         "CREATE (block)<-[:HAS_ATTR]-(:Attr {{meta: \"{}\" }})\n",
+    //         attr
+    //     ));
+    // }
+
+    // if let Some(stms) = expr.stmt_list() {
+    //     for stmt in stms.statements() {
+    //         let id = match stmt {
+    //             Stmt::ExprStmt(expr) => gen_expr(graph, expr.expr().unwrap()).await,
+    //             Stmt::Item(item) => gen_item(graph, item).await,
+    //             Stmt::LetStmt(let_stmt) => gen_let_stmt(graph, let_stmt).await,
+    //         };
+    //     }
+    // }
+
+    // return "TODO_SOME_ID".to_string();
+}
+
+
+fn gen_param_list(graph: &mut UnitedGraph, ty: ast::ParamList, parent: NodeIndex) {
+
 }
 
 /// Example:
@@ -424,14 +415,14 @@ fn gen_type(graph: &mut UnitedGraph, ty: Type, parent: NodeIndex) {
 ///  | | |
 ///  | | |-[AST, HAS_GEN_PARAM] --  
 ///  | |
-///  | ---[AST, HAS_ATTR]--> { 
+///  | ---[AST, HAS_ATTR]--> {
 ///  |                        label: Attribute,
-///  |                        meta: ... , 
+///  |                        meta: ... ,
 ///  |                       }
 ///  |--------\
 ///  |         -----------
 ///  {                   |   
-///   type: "Keyword"    { type: "LBrace", position: ... } 
+///   type: "Keyword"    { type: "LBrace", position: ... }
 ///   content: "struct"
 ///   position: ...,
 ///  }
@@ -461,20 +452,10 @@ fn gen_struct(graph: &mut UnitedGraph, item: Struct) -> NodeIndex {
         gen_field_list(graph, flist, struct_ast);
     }
 
-    gen_token(
-        graph, 
-        "Semicolon", 
-        item.semicolon_token(),
-        struct_ast
-    );
+    gen_token(graph, "Semicolon", item.semicolon_token(), struct_ast);
 
-    gen_token(
-        graph, 
-        "Struct", 
-        item.struct_token(),
-        struct_ast
-    );
-    
+    gen_token(graph, "Struct", item.struct_token(), struct_ast);
+
     struct_ast
 }
 
@@ -496,8 +477,50 @@ fn gen_fn(graph: &mut UnitedGraph, item: ast::Fn) -> NodeIndex {
         fields: Default::default(),
     });
 
-    todo!();
+    gen_attrs(graph, item.attrs(), func_ast);
+    gen_docs(graph, item.doc_comments(), func_ast);
 
+    if let Some(l) = item.generic_param_list() {
+        gen_generic_param_list(graph, l, func_ast);
+    }
+
+    if let Some(name) = item.name() {
+        gen_name(graph, name, func_ast);
+    }
+
+    if let Some(vis) = item.visibility() {
+        gen_visibility(graph, vis, func_ast);
+    }
+
+    if let Some(abi) = item.abi() {
+        gen_abi(graph, abi, func_ast);
+    }
+
+    if let Some(block) = item.body() {
+        gen_block(graph, block, func_ast);
+    }
+    
+    if let Some(plist) = item.param_list() {
+        gen_param_list(graph, plist, func_ast)
+    } 
+    
+    if let Some(rtype) = item.ret_type() {
+        gen_ret_type(graph, rtype, func_ast);
+    }
+
+    let items: Vec<(&str, Box<dyn Fn(&ast::Fn) -> Option<SyntaxToken>>)> = vec![
+        ("Semicolon", Box::new(ast::Fn::semicolon_token)),
+        ("Async", Box::new(ast::Fn::async_token)),
+        ("Const", Box::new(ast::Fn::const_token)),
+        ("Default", Box::new(ast::Fn::default_token)),
+        ("Fn", Box::new(ast::Fn::fn_token)),
+        ("Unsafe", Box::new(ast::Fn::fn_token)),
+    ];
+    
+    for (name, toke) in items {
+        gen_token(graph, name, toke(&item), func_ast)
+    }
+ 
     func_ast
 }
 
@@ -676,31 +699,6 @@ async fn gen_if_expr(graph: &UnitedGraph, item: IfExpr) -> String {
     }
 
     graph.execute(query(&q_body)).await.unwrap();
-    return "TODO_SOME_ID".to_string();
-}
-
-async fn gen_block(graph: &Graph, expr: BlockExpr) -> String {
-    let mut q_body = String::new();
-
-    q_body.push_str(&format!("CREATE (block: BlockExpression)\n"));
-
-    for attr in expr.attrs() {
-        q_body.push_str(&format!(
-            "CREATE (block)<-[:HAS_ATTR]-(:Attr {{meta: \"{}\" }})\n",
-            attr
-        ));
-    }
-
-    if let Some(stms) = expr.stmt_list() {
-        for stmt in stms.statements() {
-            let id = match stmt {
-                Stmt::ExprStmt(expr) => gen_expr(graph, expr.expr().unwrap()).await,
-                Stmt::Item(item) => gen_item(graph, item).await,
-                Stmt::LetStmt(let_stmt) => gen_let_stmt(graph, let_stmt).await,
-            };
-        }
-    }
-
     return "TODO_SOME_ID".to_string();
 }
 
@@ -938,121 +936,48 @@ async fn gen_pattern(graph: &Graph, pat: Pat) -> String {
 fn gen_path(graph: &Graph, path: Path) -> String {
     todo!()
 }
-
-fn gen_enum(graph: &Graph, item: Enum) -> NodeIndex {
-    //TODO: generic params ???
-    //TODO: where clause ???
-    //TODO: visibility - what is target node???
-    //TODO: TupleField
-    //TODO: RecordFieldList
-
-    // CREATE (enum:Enum {name: $name}),
-    // (enum)<-[:HAS_VARIANT]-(variant:Variant {name: $name})
-    // (enum)<-[:VISIBLE_FROM]-(s:SourceFile {name: $name})
-    // (enum)<-[:HAS_ATTR]-(:Attr {meta: $meta})
-    //
-    // (variant)<-[:VISIBLE_FROM]-(s:SourceFile {name: $name})
-    // (variant)<-[:HAS_ATTR]-(:Attr {meta: $meta})
-    //
-    // Value form variant
-    //(variant)<-[:HAS_VALUE]-(expr:Expr)
-    //
-    // Record form variant
-    // (variant)<-[:HAS_VALUE]-(rec:Record)
-    // (rec)<-[:HAS_MEMBER]-(f:Field {name: $name})
-    //
-    // Tuple form variant
-    // (variant)<-[:HAS_VALUE]-(tuple:Tuple)
-    // (tuple)<-[:HAS_MEMBER]-(f:Field {name: $name})
-
-    let mut q_body = String::new();
-
-    let name = item.name().unwrap();
-    q_body.push_str(&format!("CREATE (enum:Enum {{name: \"{}\" }})\n", name));
-
-    for attr in item.attrs() {
-        q_body.push_str(&format!(
-            "CREATE (enum)<-[:HAS_ATTR]-(:Attr {{meta: \"{}\" }})\n",
-            attr
-        ));
-    }
-
-    // TODO: now visibility point to source file
-    q_body.push_str("CREATE (enum)<-[:VISIBLE_FROM]-(s:SourceFile {name: \"TEST.rs\"})\n");
-
-    let mut glob_record_field_idx = 0;
-    let mut glob_tuple_field_idx = 0;
-    for (variant_idx, variant) in item.variant_list().unwrap().variants().enumerate() {
-        let name = variant.name().unwrap();
-        q_body.push_str(&format!(
-            "CREATE (enum)<-[:HAS_VARIANT]-(variant_{}:Variant {{name: \"{}\" }})\n",
-            variant_idx, name
-        ));
-
-        for attr in variant.attrs() {
-            let meta = attr.meta().unwrap();
-            q_body.push_str(&format!(
-                "CREATE (variant_{})<-[:HAS_ATTR]-(:Attr {{meta: \"{}\" }})\n",
-                variant_idx, meta
-            ));
-        }
-
-        // TODO: now visibility point to source file
-        q_body.push_str(&format!(
-            "CREATE (variant_{})<-[:VISIBLE_FROM]-(s)\n",
-            variant_idx
-        ));
-
-        // Value form variant
-        if variant.eq_token().is_some() {
-            let expr = variant.expr().unwrap();
-            q_body.push_str(&format!(
-                "CREATE (variant_{})<-[:HAS_VALUE]-(expr:Expr {{expr: \"{}\" }})\n",
-                variant_idx, expr
-            ));
-        } else {
-            if let Some(field_list) = variant.field_list() {
-                match field_list {
-                    // Record form variant
-                    FieldList::RecordFieldList(rec_list) => {
-                        q_body.push_str(&format!(
-                            "CREATE (variant_{})<-[:HAS_VALUE]-(rec_{}:Record)\n",
-                            variant_idx, variant_idx
-                        ));
-
-                        for field in rec_list.fields() {
-                            let name = field.name().unwrap();
-                            q_body.push_str(&format!(
-                                            "CREATE (rec_{})<-[:HAS_MEMBER]-(filed_{}:Field {{name: \"{}\" }})\n",
-                                            variant_idx, glob_record_field_idx, name
-                                        ));
-                            glob_record_field_idx += 1;
-                        }
-                    }
-                    // Tuple form variant
-                    FieldList::TupleFieldList(tup_list) => {
-                        q_body.push_str(&format!(
-                            "CREATE (variant_{})<-[:HAS_VALUE]-(tuple_{}:Tuple)\n",
-                            variant_idx, variant_idx
-                        ));
-                        for field in tup_list.fields() {
-                            q_body.push_str(&format!(
-                                "CREATE (tuple_{})<-[:HAS_MEMBER]-(filed_{}:Field)\n",
-                                variant_idx, glob_tuple_field_idx
-                            ));
-                            glob_tuple_field_idx += 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    println!("{}", q_body);
-    graph.execute(query(&q_body)).await.unwrap();
-
-    return "TODO_SOME_ID".to_string();
-}
 */
+
+fn gen_enum(graph: &mut UnitedGraph, item: Enum, parent: NodeIndex) -> NodeIndex {
+    let enum_ast = graph.add_node(Node {
+        labels: vec!["AST".to_string(), "Enum".to_string()],
+        fields: Default::default(),
+    });
+
+    gen_attrs(graph, item.attrs(), enum_ast);
+    gen_docs(graph, item.doc_comments(), enum_ast);
+
+    if let Some(vis) = item.visibility() {
+        gen_visibility(graph, vis, enum_ast);
+    }
+
+    if let Some(generic_param_list) = item.generic_param_list() {
+        gen_generic_param_list(graph, generic_param_list, enum_ast);
+    }
+    
+    if let Some(name) = item.name() {
+        gen_name(graph, name, enum_ast);
+    }
+    
+    if let Some(variant_list) = item.variant_list() {
+        use syntax::ast::RecordFieldList;
+        let items: Vec<(&str, Box<dyn Fn(&VariantList) -> Option<SyntaxToken>>)> = vec![
+            ("LCurly", Box::new(VariantList::l_curly_token)),
+            ("RCurly", Box::new(VariantList::r_curly_token)),
+        ];
+        for (name, toke) in items {
+            gen_token(graph, name, toke(&variant_list), enum_ast);
+        }
+
+        for variant in variant_list.variants() {
+            
+        }
+    }
+
+    gen_token(graph, "Enum", item.enum_token(), enum_ast);
+
+    enum_ast
+}
 
 #[test]
 fn test_struct_parse() {
@@ -1071,7 +996,7 @@ fn test_struct_parse() {
     for item in istruct {
         gen_struct(&mut state.graph, item);
     }
-    
+
     let data = format!("{:?}", petgraph::dot::Dot::with_config(&state.graph, &[]));
     fs::write("./foo.dot", data).expect("Unable to write file");
 }
