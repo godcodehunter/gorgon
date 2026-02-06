@@ -19,6 +19,7 @@ use syntax::{
 };
 
 mod validate;
+mod def_resolver;
 
 #[derive(Debug)]
 enum Field {
